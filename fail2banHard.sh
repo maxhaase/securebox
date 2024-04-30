@@ -3,7 +3,8 @@
 # Script to monitor and ban brute force intrusion attempts on all ports using Fail2Ban.
 # Author: Max Haase
 # Email: maxhaase@gmail.com
-# Description: This script checks if Fail2Ban is installed, installs it if not, and configures it to watch all ports.
+# Description: This script ensures that Fail2Ban is installed, configures it to monitor all ports, checks the service status,
+# and provides options to fix issues or rollback changes if there are any problems.
 #################################################
 
 # Function to display usage information
@@ -37,14 +38,11 @@ install_fail2ban() {
     fi
 }
 
-# Install Fail2Ban if necessary
-install_fail2ban
+# Backup and setup Fail2Ban
+setup_fail2ban() {
+    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.conf.backup
 
-# Backup the original jail.conf
-cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.conf.backup
-
-# Create a new jail file for monitoring all ports
-cat <<EOF > /etc/fail2ban/jail.d/all-ports.conf
+    cat <<EOF > /etc/fail2ban/jail.d/all-ports.conf
 [all-ports]
 enabled = true
 port = 0:65535
@@ -54,8 +52,7 @@ maxretry = 5
 bantime = 600
 EOF
 
-# Create a filter for all-ports
-cat <<EOF > /etc/fail2ban/filter.d/all-ports.conf
+    cat <<EOF > /etc/fail2ban/filter.d/all-ports.conf
 [INCLUDES]
 before = common.conf
 
@@ -70,7 +67,36 @@ failregex = ^%(__prefix_line)sFailed \S+ for .* from <HOST>(?: port \S+)? (?:ssh
 ignoreregex =
 EOF
 
-# Restart Fail2Ban to apply the changes
-systemctl restart fail2ban
+    systemctl restart fail2ban
+}
 
-echo "Fail2Ban is now configured to monitor all ports for brute force attacks."
+# Function to check the status of Fail2Ban
+check_status() {
+    systemctl status fail2ban | grep "active (running)" &> /dev/null
+    if [ $? -eq 0 ]; then
+        echo "Fail2Ban is active and running."
+    else
+        echo "Fail2Ban is not running as expected."
+        read -p "Would you like to attempt to fix this automatically? (yes/no): " response
+        if [[ "$response" == "yes" ]]; then
+            systemctl restart fail2ban
+            check_status
+        else
+            rollback_changes
+        fi
+    fi
+}
+
+# Rollback to previous configuration
+rollback_changes() {
+    echo "Rolling back to the previous configuration..."
+    mv /etc/fail2ban/jail.conf.backup /etc/fail2ban/jail.conf
+    systemctl restart fail2ban
+    echo "Rollback complete."
+    exit 1
+}
+
+# Main script logic
+install_fail2ban
+setup_fail2ban
+check_status
